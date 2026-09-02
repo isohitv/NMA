@@ -1,0 +1,43 @@
+{
+  "name": "network-management-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MERN network management dashboard.",
+  "scripts": {
+    "dev": "npm run build:server && concurrently -k \"vite\" \"node dist/server/server/index.js\"",
+    "build": "npm run build:renderer && npm run build:server",
+    "build:renderer": "vite build",
+    "build:server": "tsc -p tsconfig.server.json",
+    "start": "node dist/server/server/index.js",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "net-snmp": "^3.26.0",
+    "ping": "^0.4.4",
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "mongoose": "^8.18.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "ssh2": "^1.16.0",
+    "systeminformation": "^5.23.5",
+    "xterm": "^5.3.0",
+    "xterm-addon-fit": "^0.8.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "@types/ping": "^0.4.4",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@types/ssh2": "^1.15.4",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "electron": "^33.2.1",
+    "typescript": "^5.7.2",
+    "tsx": "^4.19.2",
+    "vite": "^6.0.5",
+    "wait-on": "^8.0.1"
+  }
+}

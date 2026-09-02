@@ -44,6 +44,10 @@ npm start
 
 With the portable setup, use `.\run-build.ps1` to build, then `.\.node\npm.cmd start` with PATH set as above.
 
+## Vercel deployment
+
+The Vite renderer and Express API are Vercel-compatible. Import this repository into Vercel, set the `MONGODB_URI` environment variable for persistence, and deploy. The API runs as a serverless function under `/api`; raw local terminal transports and continuous polling are best suited to the desktop build or a dedicated Node host.
+
 The Electron bridge keeps Node networking APIs out of the renderer. SNMP defaults to the standard `public` community and the terminal form accepts password-based SSH authentication; use a private-key configuration when extending the session form for production deployments.
 
 ## Architecture

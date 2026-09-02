@@ -1,7 +1,7 @@
 type Json = Record<string, unknown>;
 export type WatchTarget = { _id: string; value: string; label?: string; port?: number; latencyThreshold: number; enabled: boolean; status?: string; latency?: number | null; checkedAt?: string; createdAt: string };
 export type TargetPoint = { timestamp: string; latency: number | null; status: string };
-export type TerminalSession = { id: string; name: string; protocol: 'ssh' | 'telnet' | 'tcp'; host: string; port: number; username?: string; status: string; createdAt: string; lastActivity: string; history?: Array<{ direction: string; data: string; timestamp: string }> };
+export type TerminalSession = { id: string; name: string; protocol: 'ssh' | 'telnet' | 'tcp' | 'serial'; host: string; port: number; username?: string; category?: string; savedCredential?: { id?: string; label?: string; username?: string }; scrollback?: number; logging?: { enabled: boolean; path?: string }; forwarding?: { localPort?: number; remoteHost?: string; remotePort?: number }; status: string; createdAt: string; lastActivity: string; history?: Array<{ direction: string; data: string; timestamp: string }> };
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...options });
@@ -31,6 +31,7 @@ export const api = {
   getSessionHistory: (id: string) => desktop ? Promise.resolve([]) : request<TerminalSession['history']>(`/api/terminal/sessions/${id}/history`),
   terminalWrite: (id: string, data: string) => desktop ? Promise.resolve(desktop.terminalWrite(data)) : request(`/api/terminal/sessions/${id}/write`, { method: 'POST', body: JSON.stringify({ data }) }),
   terminalClose: (id: string) => desktop ? Promise.resolve(desktop.terminalClose()) : request<void>(`/api/terminal/sessions/${id}`, { method: 'DELETE' }),
+  exportTranscriptUrl: (id: string, format: 'json' | 'csv' | 'text' = 'text') => `/api/terminal/sessions/${encodeURIComponent(id)}/export?format=${format}`,
   search: (query: string) => request<any[]>(`/api/search?q=${encodeURIComponent(query)}`),
   exportUrl: (type: string, format: 'json' | 'csv') => `/api/export?type=${encodeURIComponent(type)}&format=${format}`,
   // Electron IPC remains available for the desktop build; browser terminals use REST/WebSocket-ready APIs.

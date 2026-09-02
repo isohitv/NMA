@@ -1,11 +1,11 @@
-# Sentinel Network Management (MERN)
+# Net Mon App — Built by Sohit
 
-Sentinel is a MERN web dashboard for local network operations. It includes a dark responsive UI with:
+Net Mon App is a cross-platform desktop/web network operations dashboard. It includes a dark responsive UI with:
 
-- Dashboard metrics, per-interface traffic sampling, alerts, and ARP discovery
-- IP Watchlist with concurrent ICMP ping sweeps
-- AP Monitor with SNMP v2c/v3 polling primitives
-- SSH, Telnet, and raw TCP terminal sessions backed by xterm.js
+- Dashboard metrics, animated Recharts throughput graphs, protocol donut charts, latency trends, topology mapping, and ARP discovery
+- IP Watchlist with tags, optional TCP probes, latency thresholds, CIDR-ready targets, health history, and CSV export
+- AP Monitor with SNMP v2c/v3 polling, configurable OIDs, TCP service checks, and client/load/channel gauges
+- Session Manager with categorized SSH/Telnet/raw TCP sessions, password/private-key authentication, scrollback, history, and transcript export
 
 ## Requirements
 
@@ -51,6 +51,6 @@ The Electron bridge keeps Node networking APIs out of the renderer. SNMP default
 - `server/index.ts` owns the Express API and networking routes.
 - `server/models.ts` contains MongoDB models.
 - `src/main/services/` contains portable traffic, ICMP/TCP, ARP, SNMP, and terminal adapters reused by the API.
-- `src/renderer/App.tsx` contains the dashboard modules and xterm.js integration.
+- `src/renderer/App.tsx` contains the dashboard modules, Recharts visualizations, Lucide icons, and xterm.js integration.
 
-MongoDB is optional during development. Without `MONGODB_URI`, watchlist entries use in-memory storage and all networking routes remain available. Set `MONGODB_URI` later to enable persistence. The browser terminal UI is scaffolded; use a WebSocket gateway around `TerminalSession` for production SSH/Telnet streaming.
+MongoDB is optional during development. Without `MONGODB_URI`, watchlist and session entries use in-memory storage and all networking routes remain available. Set `MONGODB_URI` later to enable persistence. Browser terminal sessions use REST history with a WebSocket-ready endpoint; the Electron build uses the preload bridge for local transport.

@@ -7,7 +7,7 @@ import { pingHost, pingSweep, checkTcpPort, PingResult } from '../src/main/servi
 import { discoverArp, ArpDevice } from '../src/main/services/arp';
 import { pollSnmp } from '../src/main/services/snmp';
 import { TerminalConfig, TerminalProtocol, TerminalSession } from '../src/main/services/terminal';
-import { WatchTargetModel } from './models';
+import { TerminalSessionModel, WatchTargetModel } from './models';
 
 type WatchTarget = {
   _id: string;
@@ -29,6 +29,11 @@ type SessionRecord = {
   host: string;
   port: number;
   username?: string;
+  category?: string;
+  savedCredential?: { id?: string; label?: string; username?: string };
+  scrollback: number;
+  logging: { enabled: boolean; path?: string };
+  forwarding?: { localPort?: number; remoteHost?: string; remotePort?: number };
   status: 'connecting' | 'connected' | 'closed' | 'error';
   createdAt: string;
   lastActivity: string;
@@ -56,6 +61,27 @@ function addNetworkLog(event: Record<string, unknown>): void {
 function publicSession(session: SessionRecord): Omit<SessionRecord, 'transport'> {
   const { transport: _transport, ...result } = session;
   return result;
+}
+
+async function persistSession(session: SessionRecord): Promise<void> {
+  if (!databaseReady) return;
+  const { transport: _transport, ...document } = session;
+  await TerminalSessionModel.findOneAndUpdate({ id: session.id }, document, { upsert: true, new: true, setDefaultsOnInsert: true });
+}
+
+async function loadPersistedSessions(): Promise<void> {
+  if (!databaseReady) return;
+  const stored = await TerminalSessionModel.find().sort({ lastActivity: -1 }).lean();
+  stored.forEach((item) => {
+    sessions.set(item.id, {
+      ...item,
+      status: 'closed',
+      history: item.history ?? [],
+      logging: item.logging ?? { enabled: false },
+      scrollback: item.scrollback || 200,
+      transport: new TerminalSession(),
+    } as SessionRecord);
+  });
 }
 
 async function getWatchlist(): Promise<WatchTarget[]> {
@@ -197,18 +223,38 @@ app.delete('/api/watchlist/:id', async (req, res, next) => {
 
 app.get('/api/terminal/sessions', (_req, res) => res.json([...sessions.values()].map(publicSession)));
 app.get('/api/sessions', (_req, res) => res.json([...sessions.values()].map(publicSession)));
-app.post('/api/terminal/sessions', (req, res, next) => {
+app.post('/api/terminal/sessions', async (req, res, next) => {
   try {
     const protocol = (req.body.protocol ?? 'ssh') as TerminalProtocol;
-    const config: TerminalConfig = { protocol, host: String(req.body.host), port: Number(req.body.port) || (protocol === 'ssh' ? 22 : protocol === 'telnet' ? 23 : 9000), username: String(req.body.username ?? ''), password: req.body.password ? String(req.body.password) : undefined };
+    if (!['ssh', 'telnet', 'tcp', 'serial'].includes(protocol)) return res.status(400).json({ error: 'Unsupported terminal protocol' });
+    const scrollback = Math.min(10000, Math.max(50, Number(req.body.scrollback) || 200));
+    const savedCredential = req.body.savedCredential && typeof req.body.savedCredential === 'object'
+      ? { id: req.body.savedCredential.id ? String(req.body.savedCredential.id) : undefined, label: req.body.savedCredential.label ? String(req.body.savedCredential.label) : undefined, username: req.body.savedCredential.username ? String(req.body.savedCredential.username) : undefined }
+      : undefined;
+    const config: TerminalConfig = {
+      protocol, host: String(req.body.host ?? '').trim(),
+      port: Number(req.body.port) || (protocol === 'ssh' ? 22 : protocol === 'telnet' ? 23 : protocol === 'serial' ? 9600 : 9000),
+      username: String(req.body.username ?? ''), password: req.body.password ? String(req.body.password) : undefined,
+      privateKey: req.body.privateKey ? String(req.body.privateKey) : undefined,
+      privateKeyPath: req.body.privateKeyPath ? String(req.body.privateKeyPath) : undefined,
+      passphrase: req.body.passphrase ? String(req.body.passphrase) : undefined,
+      category: req.body.category ? String(req.body.category) : undefined, savedCredential, scrollback,
+      logging: { enabled: req.body.logging?.enabled === true, path: req.body.logging?.path ? String(req.body.logging.path) : undefined },
+      forwarding: req.body.forwarding && typeof req.body.forwarding === 'object' ? req.body.forwarding : undefined,
+      baudRate: Number(req.body.baudRate) || (protocol === 'serial' ? Number(req.body.port) || 9600 : undefined),
+      dataBits: req.body.dataBits ? Number(req.body.dataBits) as TerminalConfig['dataBits'] : undefined,
+      stopBits: req.body.stopBits ? Number(req.body.stopBits) as TerminalConfig['stopBits'] : undefined,
+      parity: req.body.parity ? String(req.body.parity) as TerminalConfig['parity'] : undefined,
+    };
     if (!config.host) return res.status(400).json({ error: 'Host is required' });
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
-    const record: SessionRecord = { id, name: String(req.body.name || `${protocol.toUpperCase()} ${config.host}`), protocol, host: config.host, port: config.port!, username: config.username, status: 'connecting', createdAt: now, lastActivity: now, history: [], transport: new TerminalSession() };
+    const record: SessionRecord = { id, name: String(req.body.name || `${protocol.toUpperCase()} ${config.host}`), protocol, host: config.host, port: config.port!, username: config.username, category: config.category, savedCredential, scrollback, logging: { enabled: config.logging?.enabled === true, path: config.logging?.path }, forwarding: config.forwarding, status: 'connecting', createdAt: now, lastActivity: now, history: [], transport: new TerminalSession() };
     sessions.set(id, record);
-    const writeHistory = (direction: 'in' | 'system', data: string) => { record.history.push({ direction, data, timestamp: new Date().toISOString() }); record.lastActivity = new Date().toISOString(); if (record.history.length > 200) record.history.shift(); };
+    const writeHistory = (direction: 'in' | 'system', data: string) => { record.history.push({ direction, data, timestamp: new Date().toISOString() }); record.lastActivity = new Date().toISOString(); if (record.history.length > record.scrollback) record.history.splice(0, record.history.length - record.scrollback); void persistSession(record).catch(() => undefined); };
     record.transport.connect(config, (data) => writeHistory('in', data), (message) => { record.status = 'closed'; writeHistory('system', message ?? 'Disconnected'); });
     record.status = 'connected';
+    await persistSession(record);
     addNetworkLog({ type: 'terminal-connect', sessionId: id, host: record.host, protocol });
     res.status(201).json(publicSession(record));
   } catch (error) { next(error); }
@@ -223,20 +269,32 @@ app.get('/api/sessions/:id/history', (req, res) => {
   if (!session) return res.status(404).json({ error: 'Session not found' });
   res.json(session.history);
 });
-app.post('/api/terminal/sessions/:id/write', (req, res) => {
+app.post('/api/terminal/sessions/:id/write', async (req, res) => {
   const session = sessions.get(req.params.id);
   if (!session) return res.status(404).json({ error: 'Session not found' });
   const data = String(req.body.data ?? '');
   session.transport.write(data);
   session.history.push({ direction: 'out', data, timestamp: new Date().toISOString() });
+  if (session.history.length > session.scrollback) session.history.splice(0, session.history.length - session.scrollback);
   session.lastActivity = new Date().toISOString();
+  await persistSession(session);
   res.status(202).json({ ok: true });
 });
-app.delete('/api/terminal/sessions/:id', (req, res) => {
+app.delete('/api/terminal/sessions/:id', async (req, res) => {
   const session = sessions.get(req.params.id);
   if (!session) return res.status(404).json({ error: 'Session not found' });
   session.transport.close(); session.status = 'closed';
+  await persistSession(session);
   res.status(204).end();
+});
+
+app.get('/api/terminal/sessions/:id/export', (req, res) => {
+  const session = sessions.get(req.params.id);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+  const format = String(req.query.format ?? 'text').toLowerCase();
+  if (format === 'json') return res.type('application/json').setHeader('Content-Disposition', `attachment; filename=${session.id}-transcript.json`).send(JSON.stringify(session.history, null, 2));
+  if (format === 'csv') return res.type('text/csv').setHeader('Content-Disposition', `attachment; filename=${session.id}-transcript.csv`).send(toCsv(session.history as Array<Record<string, unknown>>));
+  res.type('text/plain').setHeader('Content-Disposition', `attachment; filename=${session.id}-transcript.txt`).send(session.history.map((item) => `[${item.timestamp}] ${item.direction.toUpperCase()}\n${item.data}`).join('\n'));
 });
 app.get('/api/terminal/ws', (_req, res) => res.status(426).json({ error: 'WebSocket upgrade required', endpoint: 'ws://localhost:' + port + '/api/terminal/ws?sessionId=<id>', note: 'Create a session with POST /api/terminal/sessions first. REST write/history endpoints are available when WebSocket is unavailable.' }));
 
@@ -279,7 +337,7 @@ async function start(): Promise<void> {
   app.listen(port, () => console.log(`Sentinel API listening on http://localhost:${port}`));
   const mongoUrl = process.env.MONGODB_URI;
   if (mongoUrl) {
-    try { await mongoose.connect(mongoUrl, { serverSelectionTimeoutMS: 3000 }); databaseReady = true; console.log('MongoDB connected'); }
+    try { await mongoose.connect(mongoUrl, { serverSelectionTimeoutMS: 3000 }); databaseReady = true; await loadPersistedSessions(); console.log('MongoDB connected'); }
     catch (error) { console.warn(`MongoDB unavailable; using in-memory watchlist storage: ${error instanceof Error ? error.message : error}`); }
   } else console.log('MongoDB not configured; using in-memory watchlist storage.');
   setInterval(() => void checkAllTargets().catch(() => undefined), 30000);

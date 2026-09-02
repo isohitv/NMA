@@ -21,6 +21,7 @@ type WatchTarget = {
   checkedAt?: string;
   createdAt: string;
 };
+type TargetPoint = { timestamp: string; latency: number | null; status: string };
 type SessionRecord = {
   id: string;
   name: string;
@@ -39,6 +40,7 @@ const app = express();
 const port = Number(process.env.PORT ?? 3001);
 let databaseReady = false;
 const memoryWatchlist: WatchTarget[] = [];
+const targetHistory = new Map<string, TargetPoint[]>();
 const sessions = new Map<string, SessionRecord>();
 const networkLogs: Array<Record<string, unknown>> = [];
 let deviceCache: ArpDevice[] = [];
@@ -70,13 +72,22 @@ async function checkTarget(target: WatchTarget): Promise<WatchTarget> {
     ]);
     const threshold = target.latencyThreshold || 250;
     const status = !result.alive || !tcpReachable ? 'offline' : (result.time !== null && result.time > threshold ? 'degraded' : 'online');
-    const update: Pick<WatchTarget, 'status' | 'latency' | 'checkedAt'> = { status, latency: result.time, checkedAt: new Date().toISOString() };
+    const checkedAt = new Date().toISOString();
+    const latency = result.time;
+    const update: Pick<WatchTarget, 'status' | 'latency' | 'checkedAt'> = { status, latency, checkedAt };
+    const points = targetHistory.get(target._id) ?? [];
+    points.push({ timestamp: checkedAt, latency, status });
+    targetHistory.set(target._id, points.slice(-60));
     if (!databaseReady) Object.assign(target, update);
     else await WatchTargetModel.findByIdAndUpdate(target._id, update);
     addNetworkLog({ type: 'watchlist-check', target: target.value, port: target.port, status, latency: result.time });
     return { ...target, ...update };
   } catch {
-    return { ...target, status: 'offline', latency: null, checkedAt: new Date().toISOString() };
+    const checkedAt = new Date().toISOString();
+    const points = targetHistory.get(target._id) ?? [];
+    points.push({ timestamp: checkedAt, latency: null, status: 'offline' });
+    targetHistory.set(target._id, points.slice(-60));
+    return { ...target, status: 'offline', latency: null, checkedAt };
   }
 }
 
@@ -144,9 +155,11 @@ app.post('/api/watchlist', async (req, res, next) => {
     if (!databaseReady) {
       const item: WatchTarget = { _id: crypto.randomUUID(), ...target, status: 'unknown', latency: null, createdAt: new Date().toISOString() };
       memoryWatchlist.unshift(item);
-      return res.status(201).json(item);
+      targetHistory.set(item._id, []);
+      return res.status(201).json(await checkTarget(item));
     }
-    res.status(201).json(await WatchTargetModel.create(target));
+    const item = await WatchTargetModel.create(target);
+    res.status(201).json(await checkTarget(item.toObject() as unknown as WatchTarget));
   } catch (error) { next(error); }
 });
 app.patch('/api/watchlist/:id', async (req, res, next) => {
@@ -169,12 +182,14 @@ app.patch('/api/watchlist/:id', async (req, res, next) => {
   } catch (error) { next(error); }
 });
 app.post('/api/watchlist/check', async (_req, res, next) => { try { await checkAllTargets(); res.json(await getWatchlist()); } catch (error) { next(error); } });
+app.get('/api/watchlist/:id/history', (req, res) => res.json(targetHistory.get(req.params.id) ?? []));
 app.delete('/api/watchlist/:id', async (req, res, next) => {
   try {
     if (!databaseReady) {
       const index = memoryWatchlist.findIndex((item) => item._id === req.params.id);
       if (index < 0) return res.status(404).json({ error: 'Watch target not found' });
       memoryWatchlist.splice(index, 1);
+      targetHistory.delete(req.params.id);
     } else await WatchTargetModel.findByIdAndDelete(req.params.id);
     res.status(204).end();
   } catch (error) { next(error); }

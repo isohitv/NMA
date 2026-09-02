@@ -1,5 +1,6 @@
 type Json = Record<string, unknown>;
 export type WatchTarget = { _id: string; value: string; label?: string; port?: number; latencyThreshold: number; enabled: boolean; status?: string; latency?: number | null; checkedAt?: string; createdAt: string };
+export type TargetPoint = { timestamp: string; latency: number | null; status: string };
 export type TerminalSession = { id: string; name: string; protocol: 'ssh' | 'telnet' | 'tcp'; host: string; port: number; username?: string; status: string; createdAt: string; lastActivity: string; history?: Array<{ direction: string; data: string; timestamp: string }> };
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -24,6 +25,7 @@ export const api = {
   updateWatch: (id: string, target: Partial<WatchTarget>) => request<WatchTarget>(`/api/watchlist/${id}`, { method: 'PATCH', body: JSON.stringify(target) }),
   deleteWatch: (id: string) => request<void>(`/api/watchlist/${id}`, { method: 'DELETE' }),
   checkWatchlist: () => request<WatchTarget[]>('/api/watchlist/check', { method: 'POST' }),
+  getWatchHistory: (id: string) => request<TargetPoint[]>(`/api/watchlist/${id}/history`),
   getSessions: () => desktop ? Promise.resolve([] as TerminalSession[]) : request<TerminalSession[]>('/api/terminal/sessions'),
   createSession: (config: any) => desktop ? Promise.resolve(desktop.terminalConnect(config)).then(() => ({ id: 'desktop', name: `${String(config.protocol || 'ssh').toUpperCase()} ${config.host}`, protocol: config.protocol || 'ssh', host: config.host, port: config.port || 22, status: 'connected', createdAt: new Date().toISOString(), lastActivity: new Date().toISOString() })) : request<TerminalSession>('/api/terminal/sessions', { method: 'POST', body: JSON.stringify(config) }),
   getSessionHistory: (id: string) => desktop ? Promise.resolve([]) : request<TerminalSession['history']>(`/api/terminal/sessions/${id}/history`),

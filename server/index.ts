@@ -342,6 +342,6 @@ async function start(): Promise<void> {
   } else console.log('MongoDB not configured; using in-memory watchlist storage.');
   setInterval(() => void checkAllTargets().catch(() => undefined), 30000);
 }
-void start();
+if (!process.env.VERCEL) void start();
 
 export { app, checkAllTargets };
